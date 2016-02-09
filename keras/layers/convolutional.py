@@ -168,6 +168,28 @@ class Convolution1D(Layer):
         base_config = super(Convolution1D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if not mask:
+            return None
+        elif self.border_mode == 'same':
+            return mask
+        else:
+            # This assumes that masks are binary: in that case, this is just
+            # an OR over the mask elements affected by each kernel, which would
+            # be the behavior obtained with no masks.
+            return K.pool2d(mask, (self.filter_length, 1), (self.subsample_length, 1),
+                            self.border_mode, self.dim_ordering, pool_mode='max')
+
 
 class Convolution2D(Layer):
     '''Convolution operator for filtering windows of two-dimensional inputs.
@@ -310,6 +332,9 @@ class Convolution2D(Layer):
 
     def get_output(self, train=False):
         X = self.get_input(train)
+        mask = self.get_input_mask(train)
+        if mask:
+            X = X * mask
         conv_out = K.conv2d(X, self.W, strides=self.subsample,
                             border_mode=self.border_mode,
                             dim_ordering=self.dim_ordering,
@@ -341,6 +366,28 @@ class Convolution2D(Layer):
                   'b_constraint': self.b_constraint.get_config() if self.b_constraint else None}
         base_config = super(Convolution2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if not mask:
+            return None
+        elif self.border_mode == 'same':
+            return mask
+        else:
+            # This assumes that masks are binary: in that case, this is just
+            # an OR over the mask elements affected by each kernel, which would
+            # be the behavior obtained with no masks.
+            return K.pool2d(mask, (self.nb_row, self.nb_col), self.subsample,
+                            'valid', self.dim_ordering, pool_mode='max')
 
 
 class _Pooling1D(Layer):
@@ -494,6 +541,9 @@ class _Pooling2D(Layer):
 
     def get_output(self, train=False):
         X = self.get_input(train)
+        mask = self.get_input_mask(train)
+        if mask:
+            X = X * mask
         output = self._pooling_function(inputs=X, pool_size=self.pool_size,
                                         strides=self.strides,
                                         border_mode=self.border_mode,
@@ -508,6 +558,18 @@ class _Pooling2D(Layer):
                   'dim_ordering': self.dim_ordering}
         base_config = super(_Pooling2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        raise NotImplementedError
 
 
 class MaxPooling2D(_Pooling2D):
@@ -546,6 +608,14 @@ class MaxPooling2D(_Pooling2D):
                           border_mode, dim_ordering, pool_mode='max')
         return output
 
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if mask:
+            return K.pool2d(mask, self.pool_size, self.strides,
+                            self.border_mode, self.dim_ordering, pool_mode='max')
+        else:
+            return None
+
 
 class AveragePooling2D(_Pooling2D):
     '''Average pooling operation for spatial data.
@@ -583,6 +653,14 @@ class AveragePooling2D(_Pooling2D):
                           border_mode, dim_ordering, pool_mode='avg')
         return output
 
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if mask:
+            return K.pool2d(mask, self.pool_size, self.strides,
+                            self.border_mode, self.dim_ordering, pool_mode='avg')
+        else:
+            return None
+
 
 class UpSampling1D(Layer):
     '''Repeat each temporal step `length` times along the time axis.
@@ -610,6 +688,9 @@ class UpSampling1D(Layer):
 
     def get_output(self, train=False):
         X = self.get_input(train)
+        mask = self.get_input_mask(train)
+        if mask:
+            X = X * mask
         output = K.repeat_elements(X, self.length, axis=1)
         return output
 
@@ -618,6 +699,22 @@ class UpSampling1D(Layer):
                   'length': self.length}
         base_config = super(UpSampling1D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if mask:
+            return K.repeat_elements(mask, self.length, axis=1)
+        else:
+            return None
 
 
 class UpSampling2D(Layer):
@@ -669,6 +766,9 @@ class UpSampling2D(Layer):
 
     def get_output(self, train=False):
         X = self.get_input(train)
+        mask = self.get_input_mask(train)
+        if mask:
+            X = X * mask
         return K.resize_images(X, self.size[0], self.size[1],
                                self.dim_ordering)
 
@@ -677,6 +777,23 @@ class UpSampling2D(Layer):
                   'size': self.size}
         base_config = super(UpSampling2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if mask:
+            return K.resize_images(mask, self.size[0], self.size[1],
+                                   self.dim_ordering)
+        else:
+            return None
 
 
 class ZeroPadding1D(Layer):
@@ -709,6 +826,9 @@ class ZeroPadding1D(Layer):
 
     def get_output(self, train=False):
         X = self.get_input(train)
+        mask = self.get_input_mask(train)
+        if mask:
+            X = X * mask
         return K.temporal_padding(X, padding=self.padding)
 
     def get_config(self):
@@ -716,6 +836,22 @@ class ZeroPadding1D(Layer):
                   'padding': self.padding}
         base_config = super(ZeroPadding1D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if mask:
+            return K.temporal_padding(mask, padding=self.padding)
+        else:
+            return None
 
 
 class ZeroPadding2D(Layer):
@@ -761,6 +897,9 @@ class ZeroPadding2D(Layer):
 
     def get_output(self, train=False):
         X = self.get_input(train)
+        mask = self.get_input_mask(train)
+        if mask:
+            X = X * mask
         return K.spatial_2d_padding(X, padding=self.padding,
                                     dim_ordering=self.dim_ordering)
 
@@ -769,3 +908,20 @@ class ZeroPadding2D(Layer):
                   'padding': self.padding}
         base_config = super(ZeroPadding2D, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+    def support_masked_input(self):
+        return True
+
+    def get_input_mask(self, train=False):
+        if hasattr(self, 'previous'):
+            return self.previous.get_output_mask(train)
+        else:
+            return None
+
+    def get_output_mask(self, train=False):
+        mask = self.get_input_mask(train)
+        if mask:
+            return K.spatial_2d_padding(mask, padding=self.padding,
+                                        dim_ordering=self.dim_ordering)
+        else:
+            return None
